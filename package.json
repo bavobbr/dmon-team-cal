@@ -1,0 +1,22 @@
+{
+  "name": "dmon-team-cal",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@sveltejs/adapter-node": "^5",
+    "@sveltejs/kit": "^2",
+    "svelte": "^5",
+    "xlsx-js-style": "^1.2.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^5",
+    "typescript": "^5",
+    "vite": "^6"
+  },
+  "type": "module"
+}
