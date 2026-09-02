@@ -96,6 +96,18 @@ function extractJsonSection(html: string, keyword: string): Record<string, unkno
 	}
 }
 
+/**
+ * PHP's json_encode turns a list into an object as soon as its keys are not a
+ * contiguous 0..n range, so contactFunctions arrives as ["Speler"] for most
+ * contacts but as {"0":"Trainer","1":"Coach","3":"Speler"} for anyone whose
+ * function indices have a gap. Normalise both shapes to a plain string[].
+ */
+function toStringArray(value: unknown): string[] {
+	if (Array.isArray(value)) return value as string[];
+	if (value && typeof value === 'object') return Object.values(value as Record<string, string>);
+	return [];
+}
+
 function parseActivityDetails(eventId: number, html: string): ActivityDetails {
 	if (!html.includes('initActivityDetails')) {
 		throw new Error(`initActivityDetails not found in event ${eventId} — may not be logged in`);
@@ -107,14 +119,14 @@ function parseActivityDetails(eventId: number, html: string): ActivityDetails {
 
 	// Extract attendanceContacts — confirmed shape:
 	// { "contactId": { id: "str", fullName: "Lastname Firstname", contactFunctions: ["Speler", ...] } }
+	// contactFunctions is usually a string[] but can be an index-keyed object — see toStringArray
 	const contactsRaw = extractJsonSection(html, 'attendanceContacts:') ?? {};
 	const contacts: AttendanceContact[] = Object.entries(contactsRaw).map(([, c]) => {
 		const contact = c as Record<string, unknown>;
 		return {
 			id: Number(contact['id']),
 			fullName: contact['fullName'] as string,
-			// contactFunctions is string[] e.g. ["Speler"] or ["Coach", "Speler"]
-			contactFunctions: (contact['contactFunctions'] ?? []) as string[]
+			contactFunctions: toStringArray(contact['contactFunctions'])
 		};
 	});
 

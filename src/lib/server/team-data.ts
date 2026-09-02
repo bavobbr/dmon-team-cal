@@ -1,6 +1,7 @@
 import { fetchCompetitionTeamId, fetchMatchFeed, fetchGroupRoster } from './twizzit-api';
 import { fetchActivityDetails } from './twizzit-scrape';
-import type { MatchColumn, PlayerRow, Attendance } from '../types';
+import { getHalfSeasonRange } from './season';
+import type { MatchColumn, PlayerRow, Attendance, DateRange } from '../types';
 
 function extractOpponent(eventName: string, isHome: boolean): string {
 	const sep = ' - ';
@@ -14,12 +15,16 @@ export interface TeamData {
 	rows: PlayerRow[];
 }
 
-export async function loadTeamData(groupId: number, startDate?: string): Promise<TeamData> {
-	const from = startDate ?? new Date().toISOString().slice(0, 10);
+export async function loadTeamData(groupId: number, range?: DateRange): Promise<TeamData> {
+	// Default view starts today but keeps the current half-season's end bound
+	const { from, to } = range ?? {
+		...getHalfSeasonRange(),
+		from: new Date().toISOString().slice(0, 10)
+	};
 
 	const [competitionTeamId, feedEvents, roster] = await Promise.all([
 		fetchCompetitionTeamId(groupId),
-		fetchMatchFeed(groupId, from),
+		fetchMatchFeed(groupId, from, to),
 		fetchGroupRoster(groupId)
 	]);
 

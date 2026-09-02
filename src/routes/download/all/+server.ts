@@ -2,6 +2,7 @@ import type { RequestHandler } from './$types';
 import { fetchGroups } from '$lib/server/twizzit-api';
 import { loadTeamData, type TeamData } from '$lib/server/team-data';
 import { buildTeamSheet } from '$lib/server/xlsx-builder';
+import { getHalfSeasonRange } from '$lib/server/season';
 import XLSX from 'xlsx-js-style';
 
 function sanitizeSheetName(name: string): string {
@@ -18,6 +19,7 @@ export const GET: RequestHandler = async () => {
 		async start(controller) {
 			try {
 				const groups = await fetchGroups();
+				const range = getHalfSeasonRange();
 				send(controller, { type: 'start', total: groups.length });
 
 				const results: TeamData[] = new Array(groups.length);
@@ -26,7 +28,7 @@ export const GET: RequestHandler = async () => {
 				await Promise.allSettled(
 					groups.map(async (group, i) => {
 						try {
-							results[i] = await loadTeamData(group.id, '2026-01-01');
+							results[i] = await loadTeamData(group.id, range);
 						} catch {
 							results[i] = { columns: [], rows: [] };
 						}

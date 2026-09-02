@@ -37,3 +37,15 @@ export interface PlayerRow {
 	fullName: string;
 	attendances: Record<number, Attendance | undefined>;
 }
+
+export interface Season {
+	id: number;
+	name: string;
+	startDate: string | null;
+	endDate: string | null;
+}
+
+export interface DateRange {
+	from: string;
+	to: string;
+}

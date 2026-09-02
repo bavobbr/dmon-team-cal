@@ -1,86 +1,17 @@
-import { getSiteCookie, clearCookieCache } from './auth';
-import { ORG_ID, SEASON_ID } from './constants';
+import { siteFetch, SITE_BASE, decodeHtml } from './site-fetch';
+import { getCurrentSeasonId } from './season';
+import { ORG_ID } from './constants';
 import type { Group } from '../types';
 
-const SITE_BASE = 'https://app.twizzit.com';
-
-const ALLOWED_CATEGORIES = new Set(['Bovenbouw', 'Onderbouw', 'Trimmers']);
-
-function decodeHtml(str: string): string {
-	return str
-		.replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
-		.replace(/&amp;/g, '&')
-		.replace(/&quot;/g, '"')
-		.replace(/&apos;/g, "'")
-		.replace(/&lt;/g, '<')
-		.replace(/&gt;/g, '>');
-}
-
-// ─── URL-level response cache (10 min TTL) ────────────────────────────────────
-
-const CACHE_TTL_MS = 10 * 60 * 1000;
-const fetchCache = new Map<string, { body: string; expiresAt: number }>();
-
-function makeCacheKey(method: string, url: string, options: RequestInit): string {
-	const body = typeof options.body === 'string' ? options.body : '';
-	return `${method}:${url}:${body}`;
-}
-
-// ─── Generic authenticated site fetch with cookie retry ───────────────────────
-
-async function doSiteFetch(
-	url: string,
-	options: RequestInit,
-	cookie: string,
-	isRetry: boolean
-): Promise<string> {
-	const method = (options.method ?? 'GET').toUpperCase();
-	const t0 = Date.now();
-	const res = await fetch(url, {
-		...options,
-		headers: {
-			...(options.headers as Record<string, string> | undefined),
-			Cookie: cookie
-		},
-		redirect: 'manual'
-	});
-	console.log(`[twizzit] ${method} ${url} → ${res.status} (${Date.now() - t0}ms)${isRetry ? ' [retry]' : ''}`);
-
-	if ((res.status === 302 || res.status === 403) && !isRetry) {
-		clearCookieCache();
-		const freshCookie = await getSiteCookie();
-		return doSiteFetch(url, options, freshCookie, true);
-	}
-
-	if (res.status === 302 || res.status === 403) {
-		throw new Error(`Fetch ${url} failed after cookie refresh: ${res.status}`);
-	}
-
-	if (!res.ok) throw new Error(`Fetch ${url} failed: ${res.status}`);
-	return res.text();
-}
-
-async function siteFetch(url: string, options: RequestInit = {}): Promise<string> {
-	const method = (options.method ?? 'GET').toUpperCase();
-	const key = makeCacheKey(method, url, options);
-	const cached = fetchCache.get(key);
-	if (cached && cached.expiresAt > Date.now()) {
-		console.log(`[twizzit] ${method} ${url} → (cached)`);
-		return cached.body;
-	}
-
-	const cookie = await getSiteCookie();
-	const body = await doSiteFetch(url, options, cookie, false);
-	fetchCache.set(key, { body, expiresAt: Date.now() + CACHE_TTL_MS });
-	return body;
-}
+const ALLOWED_CATEGORIES = new Set(['Onderbouw', 'Middenbouw', 'Bovenbouw']);
 
 // ─── fetchGroups ──────────────────────────────────────────────────────────────
 
 export async function fetchGroups(): Promise<Group[]> {
+	const seasonId = await getCurrentSeasonId();
 	const url =
 		`${SITE_BASE}/v2/ajax/group/search` +
-		`?seasonId=${SEASON_ID}&organizationId=${ORG_ID}&active=1` +
+		`?seasonId=${seasonId}&organizationId=${ORG_ID}&active=1` +
 		`&teamColumns[]=name&teamColumns[]=category`;
 	const raw = await siteFetch(url);
 	const json = JSON.parse(raw) as { teamResults: string };
@@ -163,18 +94,24 @@ export async function fetchGroupRoster(
 }
 
 // ─── fetchMatchFeed ───────────────────────────────────────────────────────────
+//
+// The feed has no end-date parameter (endDate/end-date are silently ignored),
+// so the upper bound is applied here. `limit` is capped at 50 server-side —
+// anything larger silently falls back to 10 — so longer ranges are paged with
+// `offset`. Trainings are dropped after paging, since they count towards the
+// page size.
 
-export async function fetchMatchFeed(
-	groupId: number,
-	startDate: string
-): Promise<Array<{ id: number; date: string; name: string }>> {
-	const url =
-		`${SITE_BASE}/v2/ajax/feed` +
-		`?favoriteId=${groupId}&favoriteType=group&startDate=${startDate}` +
-		`&direction=future&limit=50`;
-	const html = await siteFetch(url);
+const FEED_PAGE_SIZE = 50;
+const FEED_MAX_PAGES = 20;
 
-	const events: Array<{ id: number; date: string; name: string }> = [];
+interface FeedEvent {
+	id: number;
+	date: string;
+	name: string;
+}
+
+function parseFeedPage(html: string): FeedEvent[] {
+	const events: FeedEvent[] = [];
 
 	// Split by data-id attribute to find each activity block
 	const parts = html.split(/data-id="(\d+)"/);
@@ -182,21 +119,46 @@ export async function fetchMatchFeed(
 		const id = Number(parts[i]);
 		const block = parts[i + 1] ?? '';
 
-		// Extract date
 		const dateMatch = block.match(/data-date="([^"]+)"/);
 		if (!dateMatch) continue;
-		const date = dateMatch[1];
 
-		// Extract name from <strong>
 		const nameMatch = block.match(/<strong>([^<]+)<\/strong>/);
 		if (!nameMatch) continue;
-		const name = nameMatch[1].trim();
 
-		// Skip trainings
-		if (name.endsWith('Training')) continue;
-
-		events.push({ id, date, name });
+		events.push({ id, date: dateMatch[1], name: nameMatch[1].trim() });
 	}
 
 	return events;
+}
+
+export async function fetchMatchFeed(
+	groupId: number,
+	startDate: string,
+	endDate?: string
+): Promise<FeedEvent[]> {
+	const matches: FeedEvent[] = [];
+
+	for (let page = 0; page < FEED_MAX_PAGES; page++) {
+		const url =
+			`${SITE_BASE}/v2/ajax/feed` +
+			`?favoriteId=${groupId}&favoriteType=group&startDate=${startDate}` +
+			`&direction=future&limit=${FEED_PAGE_SIZE}&offset=${page * FEED_PAGE_SIZE}`;
+		const events = parseFeedPage(await siteFetch(url));
+
+		let pastEnd = false;
+		for (const event of events) {
+			// data-date is "YYYY-MM-DD HH:MM"; ISO dates compare correctly as strings
+			if (endDate && event.date.slice(0, 10) > endDate) {
+				pastEnd = true;
+				break;
+			}
+			if (event.name.endsWith('Training')) continue;
+			matches.push(event);
+		}
+
+		// A short page means the feed is exhausted
+		if (pastEnd || events.length < FEED_PAGE_SIZE) break;
+	}
+
+	return matches;
 }
