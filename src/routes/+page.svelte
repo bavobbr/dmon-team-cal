@@ -75,6 +75,9 @@
 
 <div class="actions">
 	<button onclick={downloadAll} disabled={downloading}>Download alles</button>
+	<a href="/download/roster" download="spelerslijst.xlsx">
+		<button>Download spelerslijst</button>
+	</a>
 </div>
 
 {#if downloading}
