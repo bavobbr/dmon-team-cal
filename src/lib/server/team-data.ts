@@ -1,7 +1,17 @@
 import { fetchCompetitionTeamId, fetchMatchFeed, fetchGroupRoster } from './twizzit-api';
 import { fetchActivityDetails } from './twizzit-scrape';
 import { getHalfSeasonRange } from './season';
-import type { MatchColumn, PlayerRow, Attendance, DateRange } from '../types';
+import type {
+	MatchColumn,
+	PlayerRow,
+	Attendance,
+	DateRange,
+	FeedEvent,
+	ActivityDetails
+} from '../types';
+
+/** eventType 3 = Wedstrijd, covering both Competitiewedstrijd and Oefenwedstrijd */
+const MATCH_EVENT_TYPE = 3;
 
 function extractOpponent(eventName: string, isHome: boolean): string {
 	const sep = ' - ';
@@ -46,9 +56,23 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 		feedEvents.map((e) => fetchActivityDetails(e.id))
 	);
 
-	const columns: MatchColumn[] = feedEvents.map((event, i) => {
+	// eventType is the authority on what counts as a match; the feed's colour
+	// only narrowed down which activity pages were worth fetching. When a page
+	// could not be fetched, fall back to what the colour already proved.
+	const resolved: Array<{ event: FeedEvent; details: ActivityDetails | null }> = [];
+	for (let i = 0; i < feedEvents.length; i++) {
 		const result = activityResults[i];
-		const homeTeamId = result.status === 'fulfilled' ? result.value.homeTeamId : null;
+		if (result.status === 'rejected') {
+			console.error(`Activity fetch failed for event ${feedEvents[i].id}:`, result.reason);
+			if (feedEvents[i].definiteMatch) resolved.push({ event: feedEvents[i], details: null });
+			continue;
+		}
+		if (result.value.eventType !== MATCH_EVENT_TYPE) continue;
+		resolved.push({ event: feedEvents[i], details: result.value });
+	}
+
+	const columns: MatchColumn[] = resolved.map(({ event, details }) => {
+		const homeTeamId = details ? details.homeTeamId : null;
 		const isHome =
 			competitionTeamId !== null && homeTeamId !== null
 				? homeTeamId === competitionTeamId
@@ -68,13 +92,9 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 
 	// Collect attendance data; also pick up gastspelers from activity contacts
 	const attendanceMap = new Map<string, Attendance>();
-	for (let i = 0; i < activityResults.length; i++) {
-		const result = activityResults[i];
-		if (result.status === 'rejected') {
-			console.error(`Activity fetch failed for event ${feedEvents[i].id}:`, result.reason);
-			continue;
-		}
-		const { eventId, contacts, attendances } = result.value;
+	for (const { details } of resolved) {
+		if (!details) continue;
+		const { eventId, contacts, attendances } = details;
 
 		// Add gastspelers to the player map (not in roster, only for this match)
 		for (const contact of contacts) {

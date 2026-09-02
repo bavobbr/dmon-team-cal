@@ -1,7 +1,8 @@
 import { siteFetch, SITE_BASE, decodeHtml } from './site-fetch';
 import { getCurrentSeasonId } from './season';
+import { getMatchColours, NO_COLOUR } from './activity-types';
 import { ORG_ID } from './constants';
-import type { Group } from '../types';
+import type { Group, FeedEvent } from '../types';
 
 const ALLOWED_CATEGORIES = new Set(['Onderbouw', 'Middenbouw', 'Bovenbouw']);
 
@@ -98,20 +99,25 @@ export async function fetchGroupRoster(
 // The feed has no end-date parameter (endDate/end-date are silently ignored),
 // so the upper bound is applied here. `limit` is capped at 50 server-side —
 // anything larger silently falls back to 10 — so longer ranges are paged with
-// `offset`. Trainings are dropped after paging, since they count towards the
-// page size.
+// `offset`. Non-matches count towards the page size, so they are dropped after
+// paging, not before.
+//
+// The only type information the feed carries is the activity subtype's colour.
+// A colour under "Wedstrijd types" proves a match; #FFFFFF (no colour chosen)
+// proves nothing and is passed through as uncertain for eventType to settle.
 
 const FEED_PAGE_SIZE = 50;
 const FEED_MAX_PAGES = 20;
 
-interface FeedEvent {
+interface RawFeedEvent {
 	id: number;
 	date: string;
 	name: string;
+	colour: string | null;
 }
 
-function parseFeedPage(html: string): FeedEvent[] {
-	const events: FeedEvent[] = [];
+function parseFeedPage(html: string): RawFeedEvent[] {
+	const events: RawFeedEvent[] = [];
 
 	// Split by data-id attribute to find each activity block
 	const parts = html.split(/data-id="(\d+)"/);
@@ -125,7 +131,15 @@ function parseFeedPage(html: string): FeedEvent[] {
 		const nameMatch = block.match(/<strong>([^<]+)<\/strong>/);
 		if (!nameMatch) continue;
 
-		events.push({ id, date: dateMatch[1], name: nameMatch[1].trim() });
+		// The subtype colour on the block's left border is the only type hint here
+		const colourMatch = block.match(/border-left:\s*\d+px solid\s*(#[0-9A-Fa-f]{6})/);
+
+		events.push({
+			id,
+			date: dateMatch[1],
+			name: nameMatch[1].trim(),
+			colour: colourMatch ? colourMatch[1].toUpperCase() : null
+		});
 	}
 
 	return events;
@@ -136,6 +150,7 @@ export async function fetchMatchFeed(
 	startDate: string,
 	endDate?: string
 ): Promise<FeedEvent[]> {
+	const matchColours = await getMatchColours();
 	const matches: FeedEvent[] = [];
 
 	for (let page = 0; page < FEED_MAX_PAGES; page++) {
@@ -152,8 +167,20 @@ export async function fetchMatchFeed(
 				pastEnd = true;
 				break;
 			}
-			if (event.name.endsWith('Training')) continue;
-			matches.push(event);
+			// Without a known colour set every event has to be resolved by eventType
+			const isMatchColour = matchColours !== null && event.colour !== null
+				&& matchColours.has(event.colour);
+			const isUncertain = matchColours === null || event.colour === null
+				|| event.colour === NO_COLOUR;
+
+			if (!isMatchColour && !isUncertain) continue;
+
+			matches.push({
+				id: event.id,
+				date: event.date,
+				name: event.name,
+				definiteMatch: isMatchColour
+			});
 		}
 
 		// A short page means the feed is exhausted

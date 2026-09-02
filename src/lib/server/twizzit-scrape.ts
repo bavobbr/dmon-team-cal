@@ -113,6 +113,12 @@ function parseActivityDetails(eventId: number, html: string): ActivityDetails {
 		throw new Error(`initActivityDetails not found in event ${eventId} — may not be logged in`);
 	}
 
+	// eventType mirrors the activity subtype's family in Twizzit's settings:
+	// 1 = event, 2 = training, 3 = Wedstrijd (match), 4 = shift. This is the
+	// authoritative answer to "is this a real match?".
+	const eventTypeMatch = html.match(/eventType:\s*(\d+)/);
+	const eventType = eventTypeMatch ? Number(eventTypeMatch[1]) : null;
+
 	// Extract homeTeamId — used to determine home/away for the match
 	const homeTeamMatch = html.match(/homeTeamId:\s*"(\d+)"/);
 	const homeTeamId = homeTeamMatch ? Number(homeTeamMatch[1]) : null;
@@ -144,5 +150,5 @@ function parseActivityDetails(eventId: number, html: string): ActivityDetails {
 		};
 	});
 
-	return { eventId, homeTeamId, contacts, attendances };
+	return { eventId, eventType, homeTeamId, contacts, attendances };
 }

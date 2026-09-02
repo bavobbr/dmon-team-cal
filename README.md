@@ -8,6 +8,8 @@ A web app for **D-Mon Hockey Club** that shows upcoming match attendance per tea
 
 - Lists all active teams grouped by category (Onderbouw, Middenbouw, Bovenbouw)
 - Shows a per-team attendance grid: players × upcoming matches, with colour-coded dots
+- Real matches are identified by Twizzit's `eventType` (3 = Wedstrijd), covering both
+  Competitiewedstrijd and Oefenwedstrijd — trainings, meetings and events are excluded
 - Supports two date ranges: **Vandaag** (from today) or **Seizoen** (the current half-season)
 - Half-seasons run 1 August – 31 December and 1 January – 31 July; the one containing today is used
 - The current Twizzit season is discovered at runtime, so a season rollover needs no code change
@@ -41,6 +43,7 @@ src/
 │       ├── auth.ts              # Twizzit session cookie (2h cache, CSRF login)
 │       ├── constants.ts         # ORG_ID, fallback season ID, attendance type IDs
 │       ├── season.ts            # Current-season discovery + half-season ranges
+│       ├── activity-types.ts     # Match subtype colours (Wedstrijd types)
 │       ├── site-fetch.ts        # Authenticated fetch + 10m URL response cache
 │       ├── team-data.ts         # Main orchestrator: roster + matches + attendance
 │       ├── twizzit-api.ts       # HTML scrapers: groups, roster, match feed (10m cache)

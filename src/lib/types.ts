@@ -20,6 +20,8 @@ export interface Attendance {
 
 export interface ActivityDetails {
 	eventId: number;
+	/** 1 = event, 2 = training, 3 = match (Wedstrijd), 4 = shift */
+	eventType: number | null;
 	homeTeamId: number | null;
 	contacts: AttendanceContact[];
 	attendances: Attendance[];
@@ -48,4 +50,12 @@ export interface Season {
 export interface DateRange {
 	from: string;
 	to: string;
+}
+
+export interface FeedEvent {
+	id: number;
+	date: string;
+	name: string;
+	/** False when the feed's activity-type colour cannot prove this is a match */
+	definiteMatch: boolean;
 }
