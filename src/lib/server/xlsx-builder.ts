@@ -7,6 +7,14 @@ export const YES = 42028, NO = 42038, UNDECIDED = 42033;
 const BOLD       = { font: { bold: true } };
 const BOLD_WRAP  = { font: { bold: true }, alignment: { wrapText: true, vertical: 'center', horizontal: 'center' } };
 const GREEN_FILL = { fill: { patternType: 'solid', fgColor: { rgb: 'E8F5E9' } } };
+// Afwezig with a stated reason — matches the amber dot in the web view
+const EXCUSED_FILL = { fill: { patternType: 'solid', fgColor: { rgb: 'FDEBCF' } } };
+
+/** The reason the player typed in Twizzit, or null when there is none. */
+function reason(comment: string | null | undefined): string | null {
+	const text = comment?.trim();
+	return text ? text : null;
+}
 
 export function buildTeamSheet(columns: MatchColumn[], rows: PlayerRow[]): WorkSheet {
 	const header = [
@@ -18,13 +26,20 @@ export function buildTeamSheet(columns: MatchColumn[], rows: PlayerRow[]): WorkS
 	];
 
 	const allDecided: boolean[] = [];
-	const dataRows = rows.map((row) => {
+	// Absences with a reason, keyed by their position in the sheet (row 0 = header)
+	const excused: { r: number; c: number; text: string }[] = [];
+	const dataRows = rows.map((row, i) => {
 		let yes = 0, no = 0, undecided = 0;
-		const cells = columns.map((col) => {
+		const cells = columns.map((col, c) => {
 			const att = row.attendances[col.eventId];
 			if (!att) return '';
 			if (att.attendanceTypeId === YES) { yes++; return 'Y'; }
-			if (att.attendanceTypeId === NO)  { no++;  return 'N'; }
+			if (att.attendanceTypeId === NO)  {
+				no++;
+				const why = reason(att.comment);
+				if (why) excused.push({ r: i + 1, c: c + 1, text: why });
+				return 'N';
+			}
 			if (att.attendanceTypeId === UNDECIDED) { undecided++; return ''; }
 			return '';
 		});
@@ -67,6 +82,16 @@ export function buildTeamSheet(columns: MatchColumn[], rows: PlayerRow[]): WorkS
 			}
 		}
 	});
+
+	// Amber fill + the reason as a cell comment for excused absences. Applied after
+	// the green row fill so it wins on fully-decided rows.
+	for (const { r, c, text } of excused) {
+		const addr = XLSX.utils.encode_cell({ r, c });
+		if (!ws[addr]) ws[addr] = { t: 's', v: 'N' };
+		ws[addr].s = { ...ws[addr].s, ...EXCUSED_FILL };
+		ws[addr].c = [{ a: 'Twizzit', t: text }];
+		ws[addr].c.hidden = true;
+	}
 
 	// Bold all header cells; match columns also get wrap + center
 	for (let c = 0; c < totalCols; c++) {

@@ -11,14 +11,46 @@
 		[NO]:  '#F04825'
 	};
 
+	// Afwezig with a stated reason ("Ziek", "Werk", ...) is shown amber instead of red
+	const EXCUSED_COLOR = '#F5A623';
+
+	/** The reason the player typed in Twizzit, or null when there is none. */
+	function reason(att: Attendance | undefined): string | null {
+		const text = att?.comment?.trim();
+		return text ? text : null;
+	}
+
 	function dotColor(att: Attendance | undefined): string | null {
 		if (!att) return null;
+		if (att.attendanceTypeId === NO && reason(att)) return EXCUSED_COLOR;
 		return DOT_COLOR[att.attendanceTypeId] ?? null;
 	}
 
 	function tooltip(att: Attendance | undefined): string {
 		if (!att) return 'Geen gegevens';
-		return att.comment ? `${att.attendanceTypeName}: ${att.comment}` : att.attendanceTypeName;
+		const text = reason(att);
+		return text ? `${att.attendanceTypeName}: ${text}` : att.attendanceTypeName;
+	}
+
+	// Cells with a reason get an instant custom tooltip; the rest keep the native
+	// title attribute. A fixed-position bubble avoids being clipped by the
+	// horizontally scrolling table wrapper.
+	let tip = $state<{ text: string; x: number; y: number; below: boolean } | null>(null);
+
+	function showTip(event: MouseEvent | FocusEvent, att: Attendance) {
+		const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+		// Flip under the dot when there is no room for the bubble above it
+		const below = rect.top < 60;
+		tip = {
+			text: tooltip(att),
+			x: rect.left + rect.width / 2,
+			y: below ? rect.bottom : rect.top,
+			below
+		};
+	}
+
+	function hideTip() {
+		tip = null;
 	}
 
 	// Per-player totals (across all columns)
@@ -91,11 +123,26 @@
 						{#each data.columns as col}
 							{@const att = row.attendances[col.eventId]}
 							{@const color = dotColor(att)}
-							<td class="att-cell" title={tooltip(att)}>
-								{#if color}
+							{@const why = reason(att)}
+							{#if att && why}
+								<td
+									class="att-cell"
+									aria-label="{row.fullName} — {tooltip(att)}"
+									onmouseenter={(e) => showTip(e, att)}
+									onmouseleave={hideTip}
+									onfocusin={(e) => showTip(e, att)}
+									onfocusout={hideTip}
+									tabindex="0"
+								>
 									<span class="dot" style="background-color: {color}"></span>
-								{/if}
-							</td>
+								</td>
+							{:else}
+								<td class="att-cell" title={tooltip(att)}>
+									{#if color}
+										<span class="dot" style="background-color: {color}"></span>
+									{/if}
+								</td>
+							{/if}
 						{/each}
 						<td class="total-cell">
 							<span class="sum yes">{t.yes}</span>
@@ -124,6 +171,12 @@
 				</tr>
 			</tfoot>
 		</table>
+	</div>
+{/if}
+
+{#if tip}
+	<div class="tip" class:below={tip.below} style="left: {tip.x}px; top: {tip.y}px" role="tooltip">
+		{tip.text}
 	</div>
 {/if}
 
@@ -277,6 +330,50 @@
 
 	.att-cell {
 		vertical-align: middle;
+	}
+
+	.att-cell[tabindex]:focus-visible {
+		outline: 2px solid #0A79B2;
+		outline-offset: -2px;
+	}
+
+	.tip {
+		position: fixed;
+		z-index: 10;
+		transform: translate(-50%, -100%);
+		margin-top: -8px;
+		max-width: 16rem;
+		padding: 0.3rem 0.5rem;
+		border-radius: var(--radius);
+		background: #133B63;
+		color: #fff;
+		font-size: 0.75rem;
+		line-height: 1.3;
+		white-space: normal;
+		pointer-events: none;
+		box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+	}
+
+	.tip.below {
+		transform: translate(-50%, 0);
+		margin-top: 8px;
+	}
+
+	.tip::after {
+		content: '';
+		position: absolute;
+		top: 100%;
+		left: 50%;
+		margin-left: -5px;
+		border: 5px solid transparent;
+		border-top-color: #133B63;
+	}
+
+	.tip.below::after {
+		top: auto;
+		bottom: 100%;
+		border-top-color: transparent;
+		border-bottom-color: #133B63;
 	}
 
 	.dot {
