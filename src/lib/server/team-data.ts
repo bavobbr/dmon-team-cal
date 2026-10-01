@@ -1,8 +1,10 @@
-import { fetchCompetitionTeamId, fetchMatchFeed, fetchGroupRoster } from './twizzit-api';
+import { fetchCompetitionTeamId, fetchActivityFeed, fetchGroupRoster } from './twizzit-api';
 import { fetchActivityDetails } from './twizzit-scrape';
-import { getHalfSeasonRange } from './season';
+import { getHalfSeasonRange, getRecentRange, brusselsNow } from './season';
 import type {
+	ActivityKind,
 	MatchColumn,
+	TrainingColumn,
 	PlayerRow,
 	Attendance,
 	DateRange,
@@ -10,8 +12,14 @@ import type {
 	ActivityDetails
 } from '../types';
 
-/** eventType 3 = Wedstrijd, covering both Competitiewedstrijd and Oefenwedstrijd */
-const MATCH_EVENT_TYPE = 3;
+/**
+ * eventType on the activity page: 2 = Training, 3 = Wedstrijd (covering both
+ * Competitiewedstrijd and Oefenwedstrijd)
+ */
+const EVENT_TYPE: Record<ActivityKind, number> = { match: 3, training: 2 };
+
+/** The training tab's default view looks back this many days from today */
+export const RECENT_TRAINING_DAYS = 28;
 
 function extractOpponent(eventName: string, isHome: boolean): string {
 	const sep = ' - ';
@@ -19,6 +27,92 @@ function extractOpponent(eventName: string, isHome: boolean): string {
 	if (idx === -1) return eventName;
 	return isHome ? eventName.slice(idx + sep.length) : eventName.slice(0, idx);
 }
+
+/** "2026-09-24 20:30" → "do 24 sep 20:30" */
+function formatColumnDate(eventDate: string): string {
+	const d = new Date(eventDate.replace(' ', 'T'));
+	const datePart = d.toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short' });
+	const timePart = d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
+	return `${datePart} ${timePart}`;
+}
+
+interface ResolvedActivity {
+	event: FeedEvent;
+	details: ActivityDetails | null;
+}
+
+/**
+ * Fetch each feed event's activity page and keep the ones of the given kind.
+ * eventType is the authority; the feed's colour only narrowed down which pages
+ * were worth fetching. When a page could not be fetched, fall back to what the
+ * colour already proved.
+ */
+async function resolveActivities(
+	feedEvents: FeedEvent[],
+	kind: ActivityKind
+): Promise<ResolvedActivity[]> {
+	const results = await Promise.allSettled(feedEvents.map((e) => fetchActivityDetails(e.id)));
+
+	const resolved: ResolvedActivity[] = [];
+	for (let i = 0; i < feedEvents.length; i++) {
+		const result = results[i];
+		if (result.status === 'rejected') {
+			console.error(`Activity fetch failed for event ${feedEvents[i].id}:`, result.reason);
+			if (feedEvents[i].definite) resolved.push({ event: feedEvents[i], details: null });
+			continue;
+		}
+		if (result.value.eventType !== EVENT_TYPE[kind]) continue;
+		resolved.push({ event: feedEvents[i], details: result.value });
+	}
+	return resolved;
+}
+
+/** Authoritative player list from the group roster — filters to Speler only */
+async function loadPlayers(groupId: number): Promise<Map<number, string>> {
+	const roster = await fetchGroupRoster(groupId);
+	return new Map(roster.filter((m) => m.role === 'Speler').map((m) => [m.id, m.fullName]));
+}
+
+/**
+ * One row per player, sorted by name, with their attendance for each activity.
+ * Gastspelers invited to one of the activities are added to `players`.
+ */
+function buildRows(
+	players: Map<number, string>,
+	resolved: ResolvedActivity[]
+): PlayerRow[] {
+	const attendanceMap = new Map<string, Attendance>();
+	for (const { details } of resolved) {
+		if (!details) continue;
+		const { eventId, contacts, attendances } = details;
+
+		// Add gastspelers to the player map (not in roster, only for this activity)
+		for (const contact of contacts) {
+			if (contact.contactFunctions.includes('Gastspeler') && !players.has(contact.id)) {
+				players.set(contact.id, contact.fullName);
+			}
+		}
+
+		// Store attendance for all known players (roster + gastspelers)
+		for (const att of attendances) {
+			if (players.has(att.contactId)) {
+				attendanceMap.set(`${att.contactId}-${eventId}`, att);
+			}
+		}
+	}
+
+	return Array.from(players.entries())
+		.sort(([, a], [, b]) => a.localeCompare(b, 'nl'))
+		.map(([contactId, fullName]) => {
+			const attendances: Record<number, Attendance | undefined> = {};
+			for (const { event } of resolved) {
+				attendances[event.id] = attendanceMap.get(`${contactId}-${event.id}`);
+			}
+			return { contactId, fullName, attendances };
+		});
+}
+
+// ─── Matches ──────────────────────────────────────────────────────────────────
 
 export interface TeamData {
 	columns: MatchColumn[];
@@ -32,44 +126,13 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 		from: new Date().toISOString().slice(0, 10)
 	};
 
-	const [competitionTeamId, feedEvents, roster] = await Promise.all([
+	const [competitionTeamId, feedEvents, players] = await Promise.all([
 		fetchCompetitionTeamId(groupId),
-		fetchMatchFeed(groupId, from, to),
-		fetchGroupRoster(groupId)
+		fetchActivityFeed(groupId, 'match', from, to),
+		loadPlayers(groupId)
 	]);
 
-	// Authoritative player list from the group roster — filters to Speler only
-	const playerMap = new Map<number, string>(
-		roster
-			.filter((m) => m.role === 'Speler')
-			.map((m) => [m.id, m.fullName])
-	);
-
-	if (feedEvents.length === 0) {
-		const rows: PlayerRow[] = Array.from(playerMap.entries())
-			.sort(([, a], [, b]) => a.localeCompare(b, 'nl'))
-			.map(([contactId, fullName]) => ({ contactId, fullName, attendances: {} }));
-		return { columns: [], rows };
-	}
-
-	const activityResults = await Promise.allSettled(
-		feedEvents.map((e) => fetchActivityDetails(e.id))
-	);
-
-	// eventType is the authority on what counts as a match; the feed's colour
-	// only narrowed down which activity pages were worth fetching. When a page
-	// could not be fetched, fall back to what the colour already proved.
-	const resolved: Array<{ event: FeedEvent; details: ActivityDetails | null }> = [];
-	for (let i = 0; i < feedEvents.length; i++) {
-		const result = activityResults[i];
-		if (result.status === 'rejected') {
-			console.error(`Activity fetch failed for event ${feedEvents[i].id}:`, result.reason);
-			if (feedEvents[i].definiteMatch) resolved.push({ event: feedEvents[i], details: null });
-			continue;
-		}
-		if (result.value.eventType !== MATCH_EVENT_TYPE) continue;
-		resolved.push({ event: feedEvents[i], details: result.value });
-	}
+	const resolved = await resolveActivities(feedEvents, 'match');
 
 	const columns: MatchColumn[] = resolved.map(({ event, details }) => {
 		const homeTeamId = details ? details.homeTeamId : null;
@@ -79,47 +142,41 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 				: true;
 		return {
 			eventId: event.id,
-			date: (() => {
-				const d = new Date(event.date.replace(' ', 'T'));
-				const datePart = d.toLocaleDateString('nl-BE', { weekday: 'short', day: 'numeric', month: 'short' });
-				const timePart = d.toLocaleTimeString('nl-BE', { hour: '2-digit', minute: '2-digit' });
-				return `${datePart} ${timePart}`;
-			})(),
+			date: formatColumnDate(event.date),
 			opponent: extractOpponent(event.name, isHome),
 			isHome
 		};
 	});
 
-	// Collect attendance data; also pick up gastspelers from activity contacts
-	const attendanceMap = new Map<string, Attendance>();
-	for (const { details } of resolved) {
-		if (!details) continue;
-		const { eventId, contacts, attendances } = details;
+	return { columns, rows: buildRows(players, resolved) };
+}
 
-		// Add gastspelers to the player map (not in roster, only for this match)
-		for (const contact of contacts) {
-			if (contact.contactFunctions.includes('Gastspeler') && !playerMap.has(contact.id)) {
-				playerMap.set(contact.id, contact.fullName);
-			}
-		}
+// ─── Trainings ────────────────────────────────────────────────────────────────
 
-		// Store attendance for all known players (roster + gastspelers)
-		for (const att of attendances) {
-			if (playerMap.has(att.contactId)) {
-				attendanceMap.set(`${att.contactId}-${eventId}`, att);
-			}
-		}
-	}
+export interface TrainingData {
+	columns: TrainingColumn[];
+	rows: PlayerRow[];
+}
 
-	const rows: PlayerRow[] = Array.from(playerMap.entries())
-		.sort(([, a], [, b]) => a.localeCompare(b, 'nl'))
-		.map(([contactId, fullName]) => {
-			const attendances: Record<number, Attendance | undefined> = {};
-			for (const col of columns) {
-				attendances[col.eventId] = attendanceMap.get(`${contactId}-${col.eventId}`);
-			}
-			return { contactId, fullName, attendances };
-		});
+/** Defaults to the last four weeks up to today: the coach looks back at who came */
+export async function loadTrainingData(groupId: number, range?: DateRange): Promise<TrainingData> {
+	const { from, to } = range ?? getRecentRange(RECENT_TRAINING_DAYS);
 
-	return { columns, rows };
+	const [feedEvents, players] = await Promise.all([
+		fetchActivityFeed(groupId, 'training', from, to),
+		loadPlayers(groupId)
+	]);
+
+	const resolved = await resolveActivities(feedEvents, 'training');
+
+	const now = brusselsNow();
+	const columns: TrainingColumn[] = resolved.map(({ event }) => ({
+		eventId: event.id,
+		start: event.date,
+		date: formatColumnDate(event.date),
+		name: event.name,
+		isPast: event.date <= now
+	}));
+
+	return { columns, rows: buildRows(players, resolved) };
 }

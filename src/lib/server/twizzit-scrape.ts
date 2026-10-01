@@ -3,9 +3,51 @@ import type { ActivityDetails, AttendanceContact, Attendance } from '../types';
 
 const SITE_BASE = 'https://app.twizzit.com';
 
+// ─── Cache + concurrency limit ────────────────────────────────────────────────
+//
+// A half-season of trainings across all teams is ~1000 activity pages, and a
+// training shared by two teams (e.g. "U19B1, H1") is requested by both. Cache
+// parsed results for 10 minutes like siteFetch does, share in-flight requests,
+// and cap how many pages are fetched from Twizzit at the same time.
+
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const MAX_CONCURRENT = 8;
+
+const detailsCache = new Map<number, { details: ActivityDetails; expiresAt: number }>();
+const detailsInFlight = new Map<number, Promise<ActivityDetails>>();
+
+let active = 0;
+const waiting: Array<() => void> = [];
+
+async function withSlot<T>(fn: () => Promise<T>): Promise<T> {
+	if (active >= MAX_CONCURRENT) await new Promise<void>((resolve) => waiting.push(resolve));
+	active++;
+	try {
+		return await fn();
+	} finally {
+		active--;
+		waiting.shift()?.();
+	}
+}
+
 export async function fetchActivityDetails(eventId: number): Promise<ActivityDetails> {
-	const cookie = await getSiteCookie();
-	return doFetch(eventId, cookie);
+	const cached = detailsCache.get(eventId);
+	if (cached && cached.expiresAt > Date.now()) return cached.details;
+
+	const pending = detailsInFlight.get(eventId);
+	if (pending) return pending;
+
+	const request = withSlot(async () => doFetch(eventId, await getSiteCookie()))
+		.then((details) => {
+			detailsCache.set(eventId, { details, expiresAt: Date.now() + CACHE_TTL_MS });
+			return details;
+		})
+		.finally(() => {
+			detailsInFlight.delete(eventId);
+		});
+
+	detailsInFlight.set(eventId, request);
+	return request;
 }
 
 async function doFetch(eventId: number, cookie: string, isRetry = false): Promise<ActivityDetails> {

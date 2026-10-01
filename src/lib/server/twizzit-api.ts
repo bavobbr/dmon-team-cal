@@ -1,8 +1,8 @@
 import { siteFetch, SITE_BASE, decodeHtml } from './site-fetch';
 import { getCurrentSeasonId } from './season';
-import { getMatchColours, NO_COLOUR } from './activity-types';
+import { getFamilyColours, NO_COLOUR } from './activity-types';
 import { ORG_ID } from './constants';
-import type { Group, FeedEvent } from '../types';
+import type { Group, FeedEvent, ActivityKind } from '../types';
 
 const ALLOWED_CATEGORIES = new Set(['Onderbouw', 'Middenbouw', 'Bovenbouw']);
 
@@ -94,17 +94,19 @@ export async function fetchGroupRoster(
 	return members;
 }
 
-// ─── fetchMatchFeed ───────────────────────────────────────────────────────────
+// ─── fetchActivityFeed ────────────────────────────────────────────────────────
 //
 // The feed has no end-date parameter (endDate/end-date are silently ignored),
 // so the upper bound is applied here. `limit` is capped at 50 server-side —
 // anything larger silently falls back to 10 — so longer ranges are paged with
-// `offset`. Non-matches count towards the page size, so they are dropped after
-// paging, not before.
+// `offset`. Other activities count towards the page size, so they are dropped
+// after paging, not before. Despite direction=future, a startDate in the past
+// returns past activities too, which the training report relies on.
 //
 // The only type information the feed carries is the activity subtype's colour.
-// A colour under "Wedstrijd types" proves a match; #FFFFFF (no colour chosen)
-// proves nothing and is passed through as uncertain for eventType to settle.
+// A colour under the kind's family (e.g. "Wedstrijd types") proves the kind;
+// #FFFFFF (no colour chosen) proves nothing and is passed through as uncertain
+// for eventType to settle.
 
 const FEED_PAGE_SIZE = 50;
 const FEED_MAX_PAGES = 20;
@@ -137,7 +139,7 @@ function parseFeedPage(html: string): RawFeedEvent[] {
 		events.push({
 			id,
 			date: dateMatch[1],
-			name: nameMatch[1].trim(),
+			name: decodeHtml(nameMatch[1].trim()),
 			colour: colourMatch ? colourMatch[1].toUpperCase() : null
 		});
 	}
@@ -145,13 +147,14 @@ function parseFeedPage(html: string): RawFeedEvent[] {
 	return events;
 }
 
-export async function fetchMatchFeed(
+export async function fetchActivityFeed(
 	groupId: number,
+	kind: ActivityKind,
 	startDate: string,
 	endDate?: string
 ): Promise<FeedEvent[]> {
-	const matchColours = await getMatchColours();
-	const matches: FeedEvent[] = [];
+	const kindColours = await getFamilyColours(kind);
+	const activities: FeedEvent[] = [];
 
 	for (let page = 0; page < FEED_MAX_PAGES; page++) {
 		const url =
@@ -168,18 +171,18 @@ export async function fetchMatchFeed(
 				break;
 			}
 			// Without a known colour set every event has to be resolved by eventType
-			const isMatchColour = matchColours !== null && event.colour !== null
-				&& matchColours.has(event.colour);
-			const isUncertain = matchColours === null || event.colour === null
+			const isKindColour = kindColours !== null && event.colour !== null
+				&& kindColours.has(event.colour);
+			const isUncertain = kindColours === null || event.colour === null
 				|| event.colour === NO_COLOUR;
 
-			if (!isMatchColour && !isUncertain) continue;
+			if (!isKindColour && !isUncertain) continue;
 
-			matches.push({
+			activities.push({
 				id: event.id,
 				date: event.date,
 				name: event.name,
-				definiteMatch: isMatchColour
+				definite: isKindColour
 			});
 		}
 
@@ -187,5 +190,5 @@ export async function fetchMatchFeed(
 		if (pastEnd || events.length < FEED_PAGE_SIZE) break;
 	}
 
-	return matches;
+	return activities;
 }

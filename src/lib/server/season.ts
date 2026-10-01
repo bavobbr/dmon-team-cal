@@ -126,3 +126,32 @@ export function getHalfSeasonRange(now: Date = new Date()): DateRange {
 		? { from: iso(year, 8, 1), to: iso(year, 12, 31) }
 		: { from: iso(year, 1, 1), to: iso(year, 7, 31) };
 }
+
+// ─── Relative ranges ──────────────────────────────────────────────────────────
+//
+// Twizzit's dates are Belgian wall-clock time ("YYYY-MM-DD HH:MM"), while the
+// server may run in UTC (Cloud Run). Compare against Brussels time so a
+// training at 20:30 does not count as "already happened" at 19:00 local.
+
+const BRUSSELS = new Intl.DateTimeFormat('sv-SE', {
+	timeZone: 'Europe/Brussels',
+	year: 'numeric',
+	month: '2-digit',
+	day: '2-digit',
+	hour: '2-digit',
+	minute: '2-digit',
+	hour12: false
+});
+
+/** Current Brussels time as "YYYY-MM-DD HH:MM", comparable with Twizzit's dates */
+export function brusselsNow(now: Date = new Date()): string {
+	return BRUSSELS.format(now);
+}
+
+/** The last `days` days up to and including today (Brussels) */
+export function getRecentRange(days: number, now: Date = new Date()): DateRange {
+	const to = brusselsNow(now).slice(0, 10);
+	const from = new Date(`${to}T00:00:00Z`);
+	from.setUTCDate(from.getUTCDate() - days);
+	return { from: from.toISOString().slice(0, 10), to };
+}

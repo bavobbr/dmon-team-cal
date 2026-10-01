@@ -8,13 +8,18 @@
 	let progressTotal = $state(0);
 	let progressCurrent = $state('');
 
-	function downloadAll() {
+	const DOWNLOAD_FILE = {
+		match: 'aanwezigheid-alle-ploegen.xlsx',
+		training: 'trainingen-alle-ploegen.xlsx'
+	};
+
+	function downloadAll(kind: 'match' | 'training') {
 		downloading = true;
 		progressDone = 0;
 		progressTotal = 0;
 		progressCurrent = '';
 
-		const es = new EventSource('/download/all');
+		const es = new EventSource(`/download/all?kind=${kind}`);
 
 		es.onmessage = (e) => {
 			const msg = JSON.parse(e.data);
@@ -33,7 +38,7 @@
 				const url = URL.createObjectURL(blob);
 				const a = document.createElement('a');
 				a.href = url;
-				a.download = 'aanwezigheid-alle-ploegen.xlsx';
+				a.download = DOWNLOAD_FILE[kind];
 				a.click();
 				URL.revokeObjectURL(url);
 				downloading = false;
@@ -74,7 +79,8 @@
 {/if}
 
 <div class="actions">
-	<button onclick={downloadAll} disabled={downloading}>Download alles</button>
+	<button onclick={() => downloadAll('match')} disabled={downloading}>Download alle wedstrijden</button>
+	<button onclick={() => downloadAll('training')} disabled={downloading}>Download alle trainingen</button>
 	<a href="/download/roster" download="spelerslijst.xlsx">
 		<button>Download spelerslijst</button>
 	</a>

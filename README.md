@@ -1,20 +1,30 @@
 # D-Mon Team Calendar
 
-A web app for **D-Mon Hockey Club** that shows upcoming match attendance per team, scraped live from [Twizzit](https://app.twizzit.com). Coaches can see at a glance which players confirmed, declined, or haven't responded yet, and export the data to Excel.
+A web app for **D-Mon Hockey Club** that shows match and training attendance per team, scraped live from [Twizzit](https://app.twizzit.com). Coaches can see at a glance which players confirmed, declined, or haven't responded yet for upcoming matches, look back at who came to training, and export the data to Excel.
 
 ---
 
 ## What it does
 
 - Lists all active teams grouped by category (Onderbouw, Middenbouw, Bovenbouw)
-- Shows a per-team attendance grid: players × upcoming matches, with colour-coded dots
-- Real matches are identified by Twizzit's `eventType` (3 = Wedstrijd), covering both
-  Competitiewedstrijd and Oefenwedstrijd — trainings, meetings and events are excluded
-- Supports two date ranges: **Vandaag** (from today) or **Seizoen** (the current half-season)
+- Each team page has two tabs, **Wedstrijden** and **Trainingen**, each a players × activities
+  grid with colour-coded dots
+- Activities are identified by Twizzit's `eventType`: 3 = Wedstrijd (Competitiewedstrijd and
+  Oefenwedstrijd), 2 = Training — meetings, events and shifts are excluded
+- **Wedstrijden** answers "who has indicated presence?": **Vandaag** (from today) or **Seizoen**
+  (the current half-season)
+- **Trainingen** answers "who came to train?": **Recent** (the last 4 weeks up to today) or
+  **Seizoen**. Coaches correct attendance in Twizzit after training, so past trainings show who
+  actually came. Totals and the **%** attendance rate count only trainings that already
+  started; planned trainings are greyed out
 - Half-seasons run 1 August – 31 December and 1 January – 31 July; the one containing today is used
 - The current Twizzit season is discovered at runtime, so a season rollover needs no code change
-- Exports a single team to `.xlsx` (one sheet)
-- Exports all teams at once to `.xlsx` (one sheet per team) with a real-time progress bar
+- Exports a single team to `.xlsx`: the match grid, or for trainings the grid plus a flat
+  **Data** sheet (one row per player per training, with IDs and a real date column) for analysis
+  in other tools
+- Exports all teams at once to `.xlsx` (one sheet per team, plus a combined **Data** sheet for
+  trainings) with a real-time progress bar
+- Exports a player list (ID, name, team) across all teams
 - Protected by HTTP Basic Auth — single shared club password
 
 ---
@@ -39,26 +49,36 @@ src/
 ├── hooks.server.ts              # Basic Auth on every request
 ├── lib/
 │   ├── types.ts                 # Shared TypeScript interfaces
-│   └── server/
-│       ├── auth.ts              # Twizzit session cookie (2h cache, CSRF login)
-│       ├── constants.ts         # ORG_ID, fallback season ID, attendance type IDs
-│       ├── season.ts            # Current-season discovery + half-season ranges
-│       ├── activity-types.ts     # Match subtype colours (Wedstrijd types)
-│       ├── site-fetch.ts        # Authenticated fetch + 10m URL response cache
-│       ├── team-data.ts         # Main orchestrator: roster + matches + attendance
-│       ├── twizzit-api.ts       # HTML scrapers: groups, roster, match feed (10m cache)
-│       ├── twizzit-scrape.ts    # Parses window.initActivityDetails() JS objects
-│       └── xlsx-builder.ts      # Builds styled Excel worksheets
+│   ├── server/
+│   │   ├── auth.ts              # Twizzit session cookie (2h cache, CSRF login)
+│   │   ├── constants.ts         # ORG_ID, fallback season ID, attendance type IDs
+│   │   ├── season.ts            # Current-season discovery + half-season ranges
+│   │   ├── activity-types.ts    # Subtype colours per family (Wedstrijd / Training types)
+│   │   ├── site-fetch.ts        # Authenticated fetch + 10m URL response cache
+│   │   ├── team-data.ts         # Main orchestrator: roster + matches/trainings + attendance
+│   │   ├── twizzit-api.ts       # HTML scrapers: groups, roster, activity feed (10m cache)
+│   │   ├── twizzit-scrape.ts    # Parses window.initActivityDetails() JS objects (10m cache)
+│   │   └── xlsx-builder.ts      # Builds styled Excel worksheets
+│   └── components/
+│       ├── AttendanceTable.svelte  # Shared players × activities grid
+│       └── TeamToolbar.svelte      # Wedstrijden/Trainingen tabs, range toggle, download
 └── routes/
     ├── +page.server.ts          # Home: fetch & group all teams
-    ├── +page.svelte             # Home: team list + "Download alles" button
+    ├── +page.svelte             # Home: team list + all-teams download buttons
     ├── download/all/
-    │   └── +server.ts           # SSE endpoint: parallel all-teams Excel export
+    │   └── +server.ts           # SSE endpoint: all-teams Excel export, ?kind=match|training
+    ├── download/roster/
+    │   └── +server.ts           # Player list Excel export
     └── team/[groupId]/
-        ├── +page.server.ts      # Team: load columns & rows, ?from= param
-        ├── +page.svelte         # Team: attendance table
-        └── download/
-            └── +server.ts       # Single-team Excel download
+        ├── +page.server.ts      # Matches: load columns & rows, ?from= param
+        ├── +page.svelte         # Matches: attendance table
+        ├── download/
+        │   └── +server.ts       # Single-team match Excel download
+        └── trainingen/
+            ├── +page.server.ts  # Trainings: ?from=season, default last 4 weeks
+            ├── +page.svelte     # Trainings: attendance table with %
+            └── download/
+                └── +server.ts   # Single-team training Excel (grid + Data sheet)
 ```
 
 ---
@@ -67,8 +87,8 @@ src/
 
 1. **Teams** — scraped from `/v2/ajax/group/search`, filtered to allowed categories
 2. **Roster** — fetched from `/v2/ajax/group/profile?groupId=` — authoritative player list, avoids contamination from internal (club vs club) matches
-3. **Matches** — fetched from `/v2/ajax/feed`, trainings filtered out
-4. **Attendance** — fetched from `/v2/activity/details` per match, parsed from an embedded `window.initActivityDetails({...})` JS object
+3. **Matches / trainings** — fetched from `/v2/ajax/feed`, pre-filtered by the subtype colour of the wanted family
+4. **Attendance** — fetched from `/v2/activity/details` per activity (max 8 at a time), parsed from an embedded `window.initActivityDetails({...})` JS object; `eventType` there decides match vs training
 5. **Guest players** (`Gastspeler`) — discovered from activity contacts and merged into the roster
 
 All Twizzit requests are cached for 10 minutes by URL.

@@ -1,7 +1,7 @@
 import type { RequestHandler } from './$types';
 import { fetchGroups } from '$lib/server/twizzit-api';
-import { loadTeamData, type TeamData } from '$lib/server/team-data';
-import { buildTeamSheet } from '$lib/server/xlsx-builder';
+import { loadTeamData, loadTrainingData, type TeamData, type TrainingData } from '$lib/server/team-data';
+import { buildTeamSheet, buildTrainingSheet, buildTrainingDataSheet } from '$lib/server/xlsx-builder';
 import { getHalfSeasonRange } from '$lib/server/season';
 import XLSX from 'xlsx-js-style';
 
@@ -14,7 +14,9 @@ function send(controller: ReadableStreamDefaultController, data: object) {
 	controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
 }
 
-export const GET: RequestHandler = async () => {
+export const GET: RequestHandler = async ({ url }) => {
+	const kind = url.searchParams.get('kind') === 'training' ? 'training' : 'match';
+
 	const stream = new ReadableStream({
 		async start(controller) {
 			try {
@@ -22,13 +24,15 @@ export const GET: RequestHandler = async () => {
 				const range = getHalfSeasonRange();
 				send(controller, { type: 'start', total: groups.length });
 
-				const results: TeamData[] = new Array(groups.length);
+				const results: Array<TeamData | TrainingData> = new Array(groups.length);
 				let done = 0;
 
 				await Promise.allSettled(
 					groups.map(async (group, i) => {
 						try {
-							results[i] = await loadTeamData(group.id, range);
+							results[i] = kind === 'training'
+								? await loadTrainingData(group.id, range)
+								: await loadTeamData(group.id, range);
 						} catch {
 							results[i] = { columns: [], rows: [] };
 						}
@@ -40,10 +44,22 @@ export const GET: RequestHandler = async () => {
 				// Build workbook
 				const wb = XLSX.utils.book_new();
 
+				if (kind === 'training') {
+					// One flat sheet with every team first, for analysis in other tools
+					const teams = groups.map((group, i) => ({
+						teamId: group.id,
+						teamName: group.name,
+						...(results[i] as TrainingData)
+					}));
+					XLSX.utils.book_append_sheet(wb, buildTrainingDataSheet(teams), 'Data');
+				}
+
 				for (let i = 0; i < groups.length; i++) {
-					const { columns, rows } = results[i];
+					const { rows } = results[i];
 					if (rows.length === 0) continue;
-					const ws = buildTeamSheet(columns, rows);
+					const ws = kind === 'training'
+						? buildTrainingSheet((results[i] as TrainingData).columns, rows)
+						: buildTeamSheet((results[i] as TeamData).columns, rows);
 					XLSX.utils.book_append_sheet(wb, ws, sanitizeSheetName(groups[i].name));
 				}
 

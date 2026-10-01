@@ -27,11 +27,26 @@ export interface ActivityDetails {
 	attendances: Attendance[];
 }
 
+/** Which family of activities a report covers */
+export type ActivityKind = 'match' | 'training';
+
 export interface MatchColumn {
 	eventId: number;
 	date: string;
 	opponent: string;
 	isHome: boolean;
+}
+
+export interface TrainingColumn {
+	eventId: number;
+	/** Twizzit's local start time, "YYYY-MM-DD HH:MM" */
+	start: string;
+	/** Display label, e.g. "do 24 sep 20:30" */
+	date: string;
+	/** Activity name, e.g. "U19B1, H1 - Training" */
+	name: string;
+	/** Already started — only these count towards totals and attendance rate */
+	isPast: boolean;
 }
 
 export interface PlayerRow {
@@ -56,6 +71,6 @@ export interface FeedEvent {
 	id: number;
 	date: string;
 	name: string;
-	/** False when the feed's activity-type colour cannot prove this is a match */
-	definiteMatch: boolean;
+	/** False when the feed's activity-type colour cannot prove the activity's kind */
+	definite: boolean;
 }
