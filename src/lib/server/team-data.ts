@@ -134,6 +134,7 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 
 	const resolved = await resolveActivities(feedEvents, 'match');
 
+	const now = brusselsNow();
 	const columns: MatchColumn[] = resolved.map(({ event, details }) => {
 		const homeTeamId = details ? details.homeTeamId : null;
 		const isHome =
@@ -142,9 +143,12 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 				: true;
 		return {
 			eventId: event.id,
+			start: event.date,
 			date: formatColumnDate(event.date),
+			name: event.name,
 			opponent: extractOpponent(event.name, isHome),
-			isHome
+			isHome,
+			isPast: event.date <= now
 		};
 	});
 

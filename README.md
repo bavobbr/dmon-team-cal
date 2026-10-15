@@ -19,11 +19,11 @@ A web app for **D-Mon Hockey Club** that shows match and training attendance per
   started; planned trainings are greyed out
 - Half-seasons run 1 August – 31 December and 1 January – 31 July; the one containing today is used
 - The current Twizzit season is discovered at runtime, so a season rollover needs no code change
-- Exports a single team to `.xlsx`: the match grid, or for trainings the grid plus a flat
-  **Data** sheet (one row per player per training, with IDs and a real date column) for analysis
-  in other tools
-- Exports all teams at once to `.xlsx` (one sheet per team, plus a combined **Data** sheet for
-  trainings) with a real-time progress bar
+- Exports a single team to `.xlsx`: the match or training grid plus a flat **Data** sheet (one
+  row per player per activity, with IDs, a real date column, the status and the reason the
+  player gave) for analysis in other tools. For matches it also has the opponent and home/away
+- Exports all teams at once to `.xlsx` (one sheet per team, plus a combined **Data** sheet) with
+  a real-time progress bar
 - Exports a player list (ID, name, team) across all teams
 - Protected by HTTP Basic Auth — single shared club password
 
@@ -73,7 +73,7 @@ src/
         ├── +page.server.ts      # Matches: load columns & rows, ?from= param
         ├── +page.svelte         # Matches: attendance table
         ├── download/
-        │   └── +server.ts       # Single-team match Excel download
+        │   └── +server.ts       # Single-team match Excel (grid + Data sheet)
         └── trainingen/
             ├── +page.server.ts  # Trainings: ?from=season, default last 4 weeks
             ├── +page.svelte     # Trainings: attendance table with %

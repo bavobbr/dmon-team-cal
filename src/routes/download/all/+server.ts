@@ -1,7 +1,14 @@
 import type { RequestHandler } from './$types';
 import { fetchGroups } from '$lib/server/twizzit-api';
 import { loadTeamData, loadTrainingData, type TeamData, type TrainingData } from '$lib/server/team-data';
-import { buildTeamSheet, buildTrainingSheet, buildTrainingDataSheet } from '$lib/server/xlsx-builder';
+import {
+	buildTeamSheet,
+	buildTrainingSheet,
+	buildTrainingDataSheet,
+	buildMatchDataSheet,
+	type TrainingDataTeam,
+	type MatchDataTeam
+} from '$lib/server/xlsx-builder';
 import { getHalfSeasonRange } from '$lib/server/season';
 import XLSX from 'xlsx-js-style';
 
@@ -44,15 +51,16 @@ export const GET: RequestHandler = async ({ url }) => {
 				// Build workbook
 				const wb = XLSX.utils.book_new();
 
-				if (kind === 'training') {
-					// One flat sheet with every team first, for analysis in other tools
-					const teams = groups.map((group, i) => ({
-						teamId: group.id,
-						teamName: group.name,
-						...(results[i] as TrainingData)
-					}));
-					XLSX.utils.book_append_sheet(wb, buildTrainingDataSheet(teams), 'Data');
-				}
+				// One flat sheet with every team first, for analysis in other tools
+				const teams = groups.map((group, i) => ({
+					teamId: group.id,
+					teamName: group.name,
+					...results[i]
+				}));
+				const data = kind === 'training'
+					? buildTrainingDataSheet(teams as TrainingDataTeam[])
+					: buildMatchDataSheet(teams as MatchDataTeam[]);
+				XLSX.utils.book_append_sheet(wb, data, 'Data');
 
 				for (let i = 0; i < groups.length; i++) {
 					const { rows } = results[i];

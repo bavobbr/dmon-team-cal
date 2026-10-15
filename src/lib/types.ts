@@ -32,9 +32,16 @@ export type ActivityKind = 'match' | 'training';
 
 export interface MatchColumn {
 	eventId: number;
+	/** Twizzit's local start time, "YYYY-MM-DD HH:MM" */
+	start: string;
+	/** Display label, e.g. "za 26 sep 14:00" */
 	date: string;
+	/** Activity name, e.g. "U19B1 - Dragons" */
+	name: string;
 	opponent: string;
 	isHome: boolean;
+	/** Already started */
+	isPast: boolean;
 }
 
 export interface TrainingColumn {

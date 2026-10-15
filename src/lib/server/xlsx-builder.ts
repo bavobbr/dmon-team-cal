@@ -229,21 +229,26 @@ export function buildTrainingSheet(columns: TrainingColumn[], rows: PlayerRow[])
 
 // ─── Flat data sheet ──────────────────────────────────────────────────────────
 //
-// One row per player per training, for analysis in other tools (Excel pivot,
+// One row per player per activity, for analysis in other tools (Excel pivot,
 // Power BI, pandas, ...). Datum is a real Excel date; the IDs make it safe to
 // join or de-duplicate across exports.
 
-export interface TrainingDataTeam {
+interface DataTeam<C> {
 	teamId: number;
 	teamName: string;
-	columns: TrainingColumn[];
+	columns: C[];
 	rows: PlayerRow[];
 }
 
-const DATA_HEADER = [
-	'Ploeg', 'Ploeg ID', 'Datum', 'Tijd', 'Training', 'Training ID',
-	'Speler', 'Speler ID', 'Status', 'Opmerking', 'Afgelopen'
-];
+export type TrainingDataTeam = DataTeam<TrainingColumn>;
+export type MatchDataTeam = DataTeam<MatchColumn>;
+
+/** The activity-specific columns that sit between Tijd and Speler */
+interface ActivityFields<C> {
+	header: string[];
+	widths: number[];
+	cells: (col: C) => (string | number)[];
+}
 
 /** "YYYY-MM-DD" → Excel serial date, independent of the server's time zone */
 function excelDate(isoDate: string): number {
@@ -251,8 +256,15 @@ function excelDate(isoDate: string): number {
 	return (Date.UTC(y, m - 1, d) - Date.UTC(1899, 11, 30)) / 86400000;
 }
 
-export function buildTrainingDataSheet(teams: TrainingDataTeam[]): WorkSheet {
-	const aoa: (string | number)[][] = [DATA_HEADER];
+function buildDataSheet<C extends { eventId: number; start: string; isPast: boolean }>(
+	teams: DataTeam<C>[],
+	activity: ActivityFields<C>
+): WorkSheet {
+	const header = [
+		'Ploeg', 'Ploeg ID', 'Datum', 'Tijd', ...activity.header,
+		'Speler', 'Speler ID', 'Status', 'Opmerking', 'Afgelopen'
+	];
+	const aoa: (string | number)[][] = [header];
 
 	for (const { teamId, teamName, columns, rows } of teams) {
 		for (const col of columns) {
@@ -265,8 +277,7 @@ export function buildTrainingDataSheet(teams: TrainingDataTeam[]): WorkSheet {
 					teamId,
 					excelDate(col.start.slice(0, 10)),
 					col.start.slice(11, 16),
-					col.name,
-					col.eventId,
+					...activity.cells(col),
 					row.fullName,
 					row.contactId,
 					att.attendanceTypeName,
@@ -279,7 +290,7 @@ export function buildTrainingDataSheet(teams: TrainingDataTeam[]): WorkSheet {
 
 	const ws = XLSX.utils.aoa_to_sheet(aoa);
 
-	for (let c = 0; c < DATA_HEADER.length; c++) {
+	for (let c = 0; c < header.length; c++) {
 		ws[XLSX.utils.encode_cell({ r: 0, c })].s = BOLD;
 	}
 	for (let r = 1; r < aoa.length; r++) {
@@ -287,11 +298,28 @@ export function buildTrainingDataSheet(teams: TrainingDataTeam[]): WorkSheet {
 	}
 
 	ws['!cols'] = [
-		{ wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 7 }, { wch: 28 }, { wch: 12 },
+		{ wch: 16 }, { wch: 10 }, { wch: 12 }, { wch: 7 },
+		...activity.widths.map((wch) => ({ wch })),
 		{ wch: 28 }, { wch: 10 }, { wch: 12 }, { wch: 30 }, { wch: 10 }
 	];
 	ws['!freeze'] = { xSplit: 0, ySplit: 1 };
-	ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: DATA_HEADER.length - 1 } }) };
+	ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: header.length - 1 } }) };
 
 	return ws;
+}
+
+export function buildTrainingDataSheet(teams: TrainingDataTeam[]): WorkSheet {
+	return buildDataSheet(teams, {
+		header: ['Training', 'Training ID'],
+		widths: [28, 12],
+		cells: (col) => [col.name, col.eventId]
+	});
+}
+
+export function buildMatchDataSheet(teams: MatchDataTeam[]): WorkSheet {
+	return buildDataSheet(teams, {
+		header: ['Wedstrijd', 'Tegenstander', 'Thuis/Uit', 'Wedstrijd ID'],
+		widths: [28, 24, 9, 12],
+		cells: (col) => [col.name, col.opponent, col.isHome ? 'Thuis' : 'Uit', col.eventId]
+	});
 }
