@@ -32,8 +32,8 @@ export async function getSiteCookie(): Promise<string> {
 	if (cookieInFlight) return cookieInFlight;
 
 	cookieInFlight = (async () => {
-		// Step 1: GET /login to extract CSRF token
-		const loginPage = await fetch(`${SITE_BASE}/login`);
+		// Step 1: GET /v2/login to extract CSRF token
+		const loginPage = await fetch(`${SITE_BASE}/v2/login`);
 		const html = await loginPage.text();
 
 		// Try both common CSRF field names
