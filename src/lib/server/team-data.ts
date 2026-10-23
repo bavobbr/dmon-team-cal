@@ -67,35 +67,52 @@ async function resolveActivities(
 	return resolved;
 }
 
+interface Roster {
+	/** Members listed as Speler, by contact ID */
+	players: Map<number, string>;
+	/** Members without any player role (Coach, Manager, Team scheidsrechter, ...) */
+	staff: Set<number>;
+}
+
 /** Authoritative player list from the group roster — filters to Speler only */
-async function loadPlayers(groupId: number): Promise<Map<number, string>> {
+async function loadRoster(groupId: number): Promise<Roster> {
 	const roster = await fetchGroupRoster(groupId);
-	return new Map(roster.filter((m) => m.role === 'Speler').map((m) => [m.id, m.fullName]));
+	// A member with several roles is listed once per role
+	const players = new Map(roster.filter((m) => m.role === 'Speler').map((m) => [m.id, m.fullName]));
+	// Tijdelijke spelers are no staff: they appear through their Gastspeler tag
+	const playing = new Set(roster.filter((m) => /speler/i.test(m.role)).map((m) => m.id));
+	const staff = new Set(roster.filter((m) => !playing.has(m.id)).map((m) => m.id));
+	return { players, staff };
 }
 
 /**
  * One row per player, sorted by name, with their attendance for each activity.
- * Gastspelers invited to one of the activities are added to `players`.
+ * Gastspelers are added only for the activities they were a Gastspeler in: an
+ * activity shared with another team (e.g. "H1 - U19B1") can list this team's
+ * coach as a Gastspeler for the other side, which must not turn them into a
+ * player of this team.
  */
-function buildRows(
-	players: Map<number, string>,
-	resolved: ResolvedActivity[]
-): PlayerRow[] {
+function buildRows({ players: rosterPlayers, staff }: Roster, resolved: ResolvedActivity[]): PlayerRow[] {
+	const players = new Map(rosterPlayers);
 	const attendanceMap = new Map<string, Attendance>();
 	for (const { details } of resolved) {
 		if (!details) continue;
 		const { eventId, contacts, attendances } = details;
 
-		// Add gastspelers to the player map (not in roster, only for this activity)
+		const guests = new Set<number>();
 		for (const contact of contacts) {
-			if (contact.contactFunctions.includes('Gastspeler') && !players.has(contact.id)) {
+			if (
+				contact.contactFunctions.includes('Gastspeler') &&
+				!rosterPlayers.has(contact.id) &&
+				!staff.has(contact.id)
+			) {
+				guests.add(contact.id);
 				players.set(contact.id, contact.fullName);
 			}
 		}
 
-		// Store attendance for all known players (roster + gastspelers)
 		for (const att of attendances) {
-			if (players.has(att.contactId)) {
+			if (rosterPlayers.has(att.contactId) || guests.has(att.contactId)) {
 				attendanceMap.set(`${att.contactId}-${eventId}`, att);
 			}
 		}
@@ -126,10 +143,10 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 		from: new Date().toISOString().slice(0, 10)
 	};
 
-	const [competitionTeamId, feedEvents, players] = await Promise.all([
+	const [competitionTeamId, feedEvents, roster] = await Promise.all([
 		fetchCompetitionTeamId(groupId),
 		fetchActivityFeed(groupId, 'match', from, to),
-		loadPlayers(groupId)
+		loadRoster(groupId)
 	]);
 
 	const resolved = await resolveActivities(feedEvents, 'match');
@@ -152,7 +169,7 @@ export async function loadTeamData(groupId: number, range?: DateRange): Promise<
 		};
 	});
 
-	return { columns, rows: buildRows(players, resolved) };
+	return { columns, rows: buildRows(roster, resolved) };
 }
 
 // ─── Trainings ────────────────────────────────────────────────────────────────
@@ -166,9 +183,9 @@ export interface TrainingData {
 export async function loadTrainingData(groupId: number, range?: DateRange): Promise<TrainingData> {
 	const { from, to } = range ?? getRecentRange(RECENT_TRAINING_DAYS);
 
-	const [feedEvents, players] = await Promise.all([
+	const [feedEvents, roster] = await Promise.all([
 		fetchActivityFeed(groupId, 'training', from, to),
-		loadPlayers(groupId)
+		loadRoster(groupId)
 	]);
 
 	const resolved = await resolveActivities(feedEvents, 'training');
@@ -182,5 +199,5 @@ export async function loadTrainingData(groupId: number, range?: DateRange): Prom
 		isPast: event.date <= now
 	}));
 
-	return { columns, rows: buildRows(players, resolved) };
+	return { columns, rows: buildRows(roster, resolved) };
 }
