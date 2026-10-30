@@ -1,4 +1,5 @@
 import { getSiteCookie, clearCookieCache } from './auth';
+import { decodeHtml } from './site-fetch';
 import type { ActivityDetails, AttendanceContact, Attendance } from '../types';
 
 const SITE_BASE = 'https://app.twizzit.com';
@@ -150,6 +151,27 @@ function toStringArray(value: unknown): string[] {
 	return [];
 }
 
+/**
+ * The DETAILS box is a JS string literal of HTML, e.g.
+ * description: "<p>Vrije training <\/p>...".
+ * Its escapes are all valid JSON, so JSON.parse unescapes it; tags are then
+ * stripped and whitespace (including &nbsp;) collapsed.
+ */
+function parseDescription(html: string): string | null {
+	const match = html.match(/description:\s*("(?:[^"\\]|\\.)*")/);
+	if (!match) return null;
+	try {
+		const text = decodeHtml(
+			(JSON.parse(match[1]) as string).replace(/<[^>]+>/g, ' ').replace(/&nbsp;/g, ' ')
+		)
+			.replace(/\s+/g, ' ')
+			.trim();
+		return text || null;
+	} catch {
+		return null;
+	}
+}
+
 function parseActivityDetails(eventId: number, html: string): ActivityDetails {
 	if (!html.includes('initActivityDetails')) {
 		throw new Error(`initActivityDetails not found in event ${eventId} — may not be logged in`);
@@ -192,5 +214,5 @@ function parseActivityDetails(eventId: number, html: string): ActivityDetails {
 		};
 	});
 
-	return { eventId, eventType, homeTeamId, contacts, attendances };
+	return { eventId, eventType, homeTeamId, description: parseDescription(html), contacts, attendances };
 }

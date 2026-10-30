@@ -36,6 +36,15 @@ function formatColumnDate(eventDate: string): string {
 	return `${datePart} ${timePart}`;
 }
 
+/**
+ * A "Vrije training" (said in the activity's DETAILS text) is an optional,
+ * ad-hoc session: attendance there says nothing about commitment, so it is
+ * left out of the training report and its totals.
+ */
+function isFreeTraining(details: ActivityDetails): boolean {
+	return /vrije\s+training/i.test(details.description ?? '');
+}
+
 interface ResolvedActivity {
 	event: FeedEvent;
 	details: ActivityDetails | null;
@@ -62,6 +71,7 @@ async function resolveActivities(
 			continue;
 		}
 		if (result.value.eventType !== EVENT_TYPE[kind]) continue;
+		if (kind === 'training' && isFreeTraining(result.value)) continue;
 		resolved.push({ event: feedEvents[i], details: result.value });
 	}
 	return resolved;

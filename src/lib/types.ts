@@ -23,6 +23,8 @@ export interface ActivityDetails {
 	/** 1 = event, 2 = training, 3 = match (Wedstrijd), 4 = shift */
 	eventType: number | null;
 	homeTeamId: number | null;
+	/** The DETAILS text as plain text (e.g. "Vrije training ..."), or null when empty */
+	description: string | null;
 	contacts: AttendanceContact[];
 	attendances: Attendance[];
 }
