@@ -8,18 +8,28 @@
 	let progressTotal = $state(0);
 	let progressCurrent = $state('');
 
+	type Section = 'outdoor' | 'indoor';
+
 	const DOWNLOAD_FILE = {
-		match: 'aanwezigheid-alle-ploegen.xlsx',
-		training: 'trainingen-alle-ploegen.xlsx'
+		outdoor: {
+			match: 'aanwezigheid-alle-ploegen.xlsx',
+			training: 'trainingen-alle-ploegen.xlsx',
+			roster: 'spelerslijst.xlsx'
+		},
+		indoor: {
+			match: 'aanwezigheid-indoor.xlsx',
+			training: 'trainingen-indoor.xlsx',
+			roster: 'spelerslijst-indoor.xlsx'
+		}
 	};
 
-	function downloadAll(kind: 'match' | 'training') {
+	function downloadAll(kind: 'match' | 'training', section: Section) {
 		downloading = true;
 		progressDone = 0;
 		progressTotal = 0;
 		progressCurrent = '';
 
-		const es = new EventSource(`/download/all?kind=${kind}`);
+		const es = new EventSource(`/download/all?kind=${kind}&section=${section}`);
 
 		es.onmessage = (e) => {
 			const msg = JSON.parse(e.data);
@@ -38,7 +48,7 @@
 				const url = URL.createObjectURL(blob);
 				const a = document.createElement('a');
 				a.href = url;
-				a.download = DOWNLOAD_FILE[kind];
+				a.download = DOWNLOAD_FILE[section][kind];
 				a.click();
 				URL.revokeObjectURL(url);
 				downloading = false;
@@ -61,30 +71,37 @@
 
 <h1>Ploegen</h1>
 
-{#if data.grouped.length === 0}
+{#if data.sections.length === 0}
 	<p>Geen ploegen gevonden.</p>
 {:else}
-	{#each data.grouped as { categoryName, groups }}
-		<section>
-			<h2>{categoryName}</h2>
-			<ul>
-				{#each groups as group}
-					<li>
-						<a href="/team/{group.id}">{group.name}</a>
-					</li>
-				{/each}
-			</ul>
-		</section>
+	{#each data.sections as { key, title, categories }}
+		<div class="block">
+			{#if title}
+				<h1 class="section-title">{title}</h1>
+			{/if}
+			{#each categories as { categoryName, groups }}
+				<section>
+					<h2>{categoryName}</h2>
+					<ul>
+						{#each groups as group}
+							<li>
+								<a href="/team/{group.id}">{group.name}</a>
+							</li>
+						{/each}
+					</ul>
+				</section>
+			{/each}
+
+			<div class="actions">
+				<button onclick={() => downloadAll('match', key)} disabled={downloading}>Download alle wedstrijden</button>
+				<button onclick={() => downloadAll('training', key)} disabled={downloading}>Download alle trainingen</button>
+				<a href="/download/roster?section={key}" download={DOWNLOAD_FILE[key].roster}>
+					<button>Download spelerslijst</button>
+				</a>
+			</div>
+		</div>
 	{/each}
 {/if}
-
-<div class="actions">
-	<button onclick={() => downloadAll('match')} disabled={downloading}>Download alle wedstrijden</button>
-	<button onclick={() => downloadAll('training')} disabled={downloading}>Download alle trainingen</button>
-	<a href="/download/roster" download="spelerslijst.xlsx">
-		<button>Download spelerslijst</button>
-	</a>
-</div>
 
 {#if downloading}
 	<div class="overlay">
@@ -141,6 +158,12 @@
 
 	.actions {
 		margin-top: 2rem;
+	}
+
+	.block + .block {
+		margin-top: 3rem;
+		padding-top: 2rem;
+		border-top: 1px solid var(--color-border);
 	}
 
 	button {
