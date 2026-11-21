@@ -3,6 +3,8 @@ export interface Group {
 	name: string;
 	shortName: string;
 	categoryName: string;
+	/** True for the Indoor onderbouw / Indoor bovenbouw categories */
+	indoor: boolean;
 }
 
 export interface AttendanceContact {

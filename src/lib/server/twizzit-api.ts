@@ -4,7 +4,8 @@ import { getFamilyColours, NO_COLOUR } from './activity-types';
 import { ORG_ID } from './constants';
 import type { Group, FeedEvent, ActivityKind } from '../types';
 
-const ALLOWED_CATEGORIES = new Set(['Onderbouw', 'Middenbouw', 'Bovenbouw']);
+const OUTDOOR_CATEGORIES = new Set(['Onderbouw', 'Middenbouw', 'Bovenbouw']);
+const INDOOR_CATEGORIES = new Set(['Indoor onderbouw', 'Indoor bovenbouw']);
 
 // ─── fetchGroups ──────────────────────────────────────────────────────────────
 
@@ -41,12 +42,19 @@ export async function fetchGroups(): Promise<Group[]> {
 		if (!catMatch) continue;
 		const categoryName = catMatch[1].trim();
 
-		if (!ALLOWED_CATEGORIES.has(categoryName)) continue;
+		const indoor = INDOOR_CATEGORIES.has(categoryName);
+		if (!indoor && !OUTDOOR_CATEGORIES.has(categoryName)) continue;
 
-		groups.push({ id, name, shortName: '', categoryName });
+		groups.push({ id, name, shortName: '', categoryName, indoor });
 	}
 
 	return groups;
+}
+
+/** One group from the (cached) team list, or undefined if it isn't an active team */
+export async function fetchGroup(groupId: number): Promise<Group | undefined> {
+	const groups = await fetchGroups();
+	return groups.find((g) => g.id === groupId);
 }
 
 // ─── fetchCompetitionTeamId ───────────────────────────────────────────────────
