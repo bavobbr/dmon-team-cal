@@ -48,7 +48,7 @@ export const GET: RequestHandler = async ({ url }) => {
 	return new Response(buf, {
 		headers: {
 			'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-			'Content-Disposition': 'attachment; filename="spelerslijst.xlsx"'
+			'Content-Disposition': `attachment; filename="spelerslijst${indoor ? '-indoor' : ''}.xlsx"`
 		}
 	});
 };
