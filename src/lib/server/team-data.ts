@@ -1,6 +1,6 @@
 import { fetchCompetitionTeamId, fetchActivityFeed, fetchGroupRoster } from './twizzit-api';
 import { fetchActivityDetails } from './twizzit-scrape';
-import { getHalfSeasonRange, getRecentRange, brusselsNow } from './season';
+import { getSeasonRange, getRecentRange, brusselsNow } from './season';
 import type {
 	ActivityKind,
 	MatchColumn,
@@ -146,10 +146,14 @@ export interface TeamData {
 	rows: PlayerRow[];
 }
 
-export async function loadTeamData(groupId: number, range?: DateRange): Promise<TeamData> {
-	// Default view starts today but keeps the current half-season's end bound
+export async function loadTeamData(
+	groupId: number,
+	range?: DateRange,
+	indoor = false
+): Promise<TeamData> {
+	// Default view starts today but keeps the current season's end bound
 	const { from, to } = range ?? {
-		...getHalfSeasonRange(),
+		...getSeasonRange(indoor),
 		from: new Date().toISOString().slice(0, 10)
 	};
 
