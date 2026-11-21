@@ -109,23 +109,7 @@ export async function getCurrentSeasonId(): Promise<number> {
 	return (await getCurrentSeason()).id;
 }
 
-// ─── Half-season date ranges ──────────────────────────────────────────────────
-//
-// The club splits the year in two: 1 August – 31 December (autumn) and
-// 1 January – 31 July (spring). Together they tile the calendar year with no
-// gap or overlap, so today's date always falls in exactly one of them.
-
-function iso(year: number, month: number, day: number): string {
-	return `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-}
-
-export function getHalfSeasonRange(now: Date = new Date()): DateRange {
-	const year = now.getFullYear();
-	const isAutumn = now.getMonth() >= 7; // 0-indexed: 7 = August
-	return isAutumn
-		? { from: iso(year, 8, 1), to: iso(year, 12, 31) }
-		: { from: iso(year, 1, 1), to: iso(year, 7, 31) };
-}
+export { getHalfSeasonRange, getIndoorSeasonRange, getSeasonRange } from './season-range';
 
 // ─── Relative ranges ──────────────────────────────────────────────────────────
 //
