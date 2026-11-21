@@ -9,7 +9,7 @@ import {
 	type TrainingDataTeam,
 	type MatchDataTeam
 } from '$lib/server/xlsx-builder';
-import { getHalfSeasonRange } from '$lib/server/season';
+import { getSeasonRange } from '$lib/server/season';
 import XLSX from 'xlsx-js-style';
 
 function sanitizeSheetName(name: string): string {
@@ -23,12 +23,14 @@ function send(controller: ReadableStreamDefaultController, data: object) {
 
 export const GET: RequestHandler = async ({ url }) => {
 	const kind = url.searchParams.get('kind') === 'training' ? 'training' : 'match';
+	// Outdoor unless asked otherwise, so old links keep their meaning
+	const indoor = url.searchParams.get('section') === 'indoor';
 
 	const stream = new ReadableStream({
 		async start(controller) {
 			try {
-				const groups = await fetchGroups();
-				const range = getHalfSeasonRange();
+				const groups = (await fetchGroups()).filter((g) => g.indoor === indoor);
+				const range = getSeasonRange(indoor);
 				send(controller, { type: 'start', total: groups.length });
 
 				const results: Array<TeamData | TrainingData> = new Array(groups.length);
@@ -39,7 +41,7 @@ export const GET: RequestHandler = async ({ url }) => {
 						try {
 							results[i] = kind === 'training'
 								? await loadTrainingData(group.id, range)
-								: await loadTeamData(group.id, range);
+								: await loadTeamData(group.id, range, indoor);
 						} catch {
 							results[i] = { columns: [], rows: [] };
 						}

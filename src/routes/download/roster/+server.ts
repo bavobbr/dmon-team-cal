@@ -3,8 +3,9 @@ import { fetchGroups, fetchGroupRoster } from '$lib/server/twizzit-api';
 import XLSX from 'xlsx-js-style';
 
 
-export const GET: RequestHandler = async () => {
-	const groups = await fetchGroups();
+export const GET: RequestHandler = async ({ url }) => {
+	const indoor = url.searchParams.get('section') === 'indoor';
+	const groups = (await fetchGroups()).filter((g) => g.indoor === indoor);
 
 	const rows: Array<{ id: number; name: string; team: string }> = [];
 
